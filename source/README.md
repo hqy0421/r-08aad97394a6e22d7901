@@ -169,7 +169,7 @@ pg-cdc preflight                  # Verify the source is ready for logical repli
 pg-cdc init                       # Snapshot tables → base Iceberg/Parquet + manifest + catalog + ACL registration
 pg-cdc start                      # Stream WAL → delta epochs (the long-running daemon)
 pg-cdc compact                    # Merge deltas → new base (applies I/U/D, soft-deletes on tombstone TTL)
-pg-cdc status                     # Health: slot, lag, LSN, epochs, tables, oldest source txn
+pg-cdc status                     # Health: slot, lag, LSN, epochs, tables, received/published/compacted boundaries, oldest source txn
 pg-cdc discover [--acl] [--dry-run]      # List tables (+ role→table→column access map with --acl)
 pg-cdc reconcile [--table <q>] --force   # One-shot schema reconcile after an ALTER on a hot table
 pg-cdc teardown                   # Drop slot + publication + storage + state

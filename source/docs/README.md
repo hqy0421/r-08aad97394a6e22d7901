@@ -115,7 +115,7 @@ Governance is enforced at query time: Lake Formation tag resolution gates which 
 | `pg-cdc init` | Snapshot tables → base Iceberg/Parquet + manifest + catalog + ACL | [03](03-init.md) |
 | `pg-cdc start` | Stream WAL → delta epochs (long-running daemon) | [04](04-streaming.md) |
 | `pg-cdc compact` | Merge deltas → new base (applies I/U/D, tombstone cleanup) | [05](05-compaction.md) |
-| `pg-cdc status` | Health: slot, lag, LSN, epochs, tables, oldest txn | [08](08-operations.md) |
+| `pg-cdc status` | Health: slot, lag, LSN, epochs, tables, received/published/compacted boundaries, oldest txn | [08](08-operations.md) |
 | `pg-cdc discover` | List tables with tags/policies, optional ACLs | [08](08-operations.md) |
 | `pg-cdc reconcile --force` | One-shot schema reconcile after ALTER on hot table | [04](04-streaming.md) |
 | `pg-cdc teardown` | Drop slot + publication + storage + state | [08](08-operations.md) |

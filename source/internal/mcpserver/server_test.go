@@ -16,19 +16,31 @@ import (
 	"github.com/burnside-project/pg-cdc-core/internal/config"
 )
 
-// fakeSink is a minimal ports.Sink for tests. Only ReadManifest and Backend
-// are exercised by the MCP server; the rest are no-ops.
+// fakeSink is a minimal ports.Sink for tests. ReadManifest, ListFiles, and
+// Backend are exercised by the MCP server; the rest are no-ops.
 type fakeSink struct {
-	m *manifest.Manifest
+	m     *manifest.Manifest
+	files []string
 }
 
-func (f *fakeSink) ReadManifest(context.Context) (*manifest.Manifest, error)  { return f.m, nil }
-func (f *fakeSink) WriteManifest(context.Context, *manifest.Manifest) error   { return nil }
-func (f *fakeSink) WriteFile(context.Context, string, io.Reader) error        { return nil }
-func (f *fakeSink) ReadFile(context.Context, string) (io.ReadCloser, error)   { return nil, nil }
-func (f *fakeSink) ListFiles(context.Context, string) ([]string, error)       { return nil, nil }
-func (f *fakeSink) DeleteFile(context.Context, string) error                  { return nil }
-func (f *fakeSink) Backend() string                                           { return "filesystem" }
+func (f *fakeSink) ReadManifest(context.Context) (*manifest.Manifest, error) { return f.m, nil }
+func (f *fakeSink) WriteManifest(context.Context, *manifest.Manifest) error  { return nil }
+func (f *fakeSink) WriteFile(context.Context, string, io.Reader) error       { return nil }
+func (f *fakeSink) ReadFile(context.Context, string) (io.ReadCloser, error)  { return nil, nil }
+func (f *fakeSink) DeleteFile(context.Context, string) error                 { return nil }
+func (f *fakeSink) Backend() string                                          { return "filesystem" }
+
+// ListFiles filters the seeded file list by the requested prefix, mirroring
+// the filesystem adapter's behaviour closely enough for boundary computation.
+func (f *fakeSink) ListFiles(_ context.Context, prefix string) ([]string, error) {
+	var out []string
+	for _, p := range f.files {
+		if strings.HasPrefix(p, prefix) {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
 
 func newTestServer(storagePath string) *server {
 	return &server{
@@ -118,7 +130,7 @@ func TestToolsList(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("unmarshal tools: %v", err)
 	}
-	want := []string{"list_tables", "describe_table", "query", "recent_changes"}
+	want := []string{"list_tables", "describe_table", "query", "recent_changes", "get_freshness"}
 	if len(got.Tools) != len(want) {
 		t.Fatalf("tools count = %d, want %d", len(got.Tools), len(want))
 	}

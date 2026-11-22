@@ -20,11 +20,39 @@ pg-cdc status
   Source:         pg_cdc_slot
 
   Tables:         14 active, 3 excluded
-  Latest epoch:   42
+  Published epoch: 42 (manifest watermark read services see)
+  Received epoch:  45 (highest epoch physically in storage)
   Storage:        /var/lib/pg-cdc/output/
   Last compacted: 2026-04-12 10:00:00
   Role profiles:  3
+
+  Visibility:     12 in sync, 1 received-not-published, 1 published-not-compacted
+
+  TABLE          RECEIVED  PUBLISHED  COMPACTED  STATE                     NOTE
+  public.orders  45        42         40         received-not-published    3 epoch(s) landed, manifest not yet committed; readers will lag until the next flush commits
+  public.items   40        40         38         published-not-compacted   2 epoch(s) not yet folded into a base
 ```
+
+### Received vs. published vs. compacted
+
+The three boundaries exist because they can legitimately differ, and a single
+"latest epoch" hides the difference that matters most in an incident.
+
+| Boundary | Source of truth | Who cares |
+|---|---|---|
+| **received** | Highest epoch whose file (delta or base) is physically in storage | Did the bytes land? |
+| **published** | Manifest `latest_delta_epoch` | What read services see — the watermark they key on |
+| **compacted** | Manifest `base_epoch` | How much delta a reader must replay over the base |
+
+A flush uploads delta files and only *then* writes the manifest. If the daemon
+crashes in between, the epochs are **received but not published**: the data is on
+disk, but every reader that trusts the manifest watermark is behind until the
+next successful flush commits it. `status` previously printed a single "latest
+epoch", so this window looked healthy while readers were stale. Now it is called
+out per table.
+
+`get_freshness` (below) exposes the same boundaries over MCP, and the read tools
+accept `min_published_epoch` to fail closed against a watermark a reader needs.
 
 ## Discover
 

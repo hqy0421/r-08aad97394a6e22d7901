@@ -16,7 +16,7 @@ The MCP server is the read path for the same data the daemon writes. The daemon 
 |---|---|---|
 | Transport | stdio (the client launches it as a subprocess) | No network listener → no auth needed → simplest possible setup |
 | Auth | none | Single-user local tool; the OS user *is* the boundary |
-| Direction | read-only | All four tools read manifest or Parquet; mutations are rejected at validation |
+| Direction | read-only | All five tools read manifest or Parquet; mutations are rejected at validation |
 | Tenancy | single-user | One process serves one client |
 | Storage support | filesystem | `query` / `recent_changes` shell out to DuckDB which currently reads local files only |
 
@@ -70,7 +70,7 @@ Edit `claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Desktop. You should see `pg-cdc` listed in the MCP indicator and four tools available.
+Restart Claude Desktop. You should see `pg-cdc` listed in the MCP indicator and five tools available.
 
 ### Cursor
 
@@ -84,7 +84,7 @@ Any client that speaks MCP over stdio can connect. Provide:
 
 ## Tools
 
-The server exposes four tools. The LLM picks which to call based on the user's question.
+The server exposes five tools. The LLM picks which to call based on the user's question.
 
 ### `list_tables`
 
@@ -136,6 +136,7 @@ Runs a read-only `SELECT` against the Parquet output (base + deltas combined). T
 |---|---|---|---|
 | `sql` | string | yes | A `SELECT` (or `WITH … SELECT`) statement |
 | `limit` | integer | no | Max rows to return — default `100`, max `1000` |
+| `min_published_epoch` | integer | no | Refuse the query unless every referenced table's **published** epoch is at least this value. See [Gating a read on a published epoch](#gating-a-read-on-a-published-epoch). |
 
 **Backed by:** DuckDB CLI subprocess. Statement timeout: 15 seconds.
 
@@ -161,10 +162,62 @@ Returns rows from the *streaming delta files only* — i.e. changes that have ar
 |---|---|---|---|
 | `name` | string | yes | Fully-qualified table name |
 | `limit` | integer | no | Max rows — default `20`, max `200` |
+| `min_published_epoch` | integer | no | Refuse to return changes unless the table's **published** epoch is at least this value. See [Gating a read on a published epoch](#gating-a-read-on-a-published-epoch). |
 
 **Backed by:** DuckDB CLI subprocess.
 
 If no deltas have been written yet (e.g. you just ran `init` and haven't streamed anything), the tool returns a friendly *"no streaming changes recorded yet"* message rather than an error.
+
+### `get_freshness`
+
+Reports the received / published / compacted epoch boundaries for one table or all active tables. This is the discoverable surface for the read gate: call it first to learn the published epoch you can safely demand from `query` / `recent_changes`.
+
+**Arguments:**
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | no | Fully-qualified table name; omit for all active tables |
+| `min_published_epoch` | integer | no | If set, marks tables below this published epoch |
+
+**Backed by:** manifest read + storage object listing (no DuckDB needed).
+
+**Example output (single table):**
+```
+public.orders
+
+  received epoch:  5 (3 delta file(s) in storage)
+  published epoch: 3 (manifest watermark read services see)
+  compacted epoch: 2 (folded into base)
+  base file:       present=true
+  state:           received-not-published
+  pending:         2 epoch(s) received but not published (2 delta file(s))
+  uncompacted:     1 epoch(s) published but not folded into a base
+```
+
+The three boundaries can differ. A flush uploads delta files and *then* writes the manifest; if the daemon crashes in between, the epochs are `received-not-published` — on disk, but invisible to any reader that trusts the manifest watermark. See [Operations → Received vs. published vs. compacted](../4-operations/08-operations.md#received-vs-published-vs-compacted).
+
+### Gating a read on a published epoch
+
+`query` and `recent_changes` accept an optional `min_published_epoch`. When set, the tool checks the **published** epoch (the manifest watermark) of every table the call touches, and refuses to read if any is behind — returning an explainable status instead of silently serving stale data:
+
+```json
+{
+  "name": "query",
+  "arguments": {
+    "sql": "SELECT * FROM public.orders WHERE created_at >= TODAY() - 1",
+    "min_published_epoch": 43
+  }
+}
+```
+
+When the watermark is short, the response names the shortfall and its likely cause:
+
+```
+public.orders has published epoch 42 but at least 43 was requested (short by 1).
+Epochs 43–45 have landed in storage but the manifest has not committed them yet,
+so read services cannot see them until the next successful flush.
+```
+
+Gate on the **published** epoch, not the received epoch: a flush that landed files but did not commit the manifest leaves `published` behind even though the bytes are in storage — which is exactly the case a freshness gate exists to catch. With no `min_published_epoch` (or `0`), the tools read whatever the manifest currently publishes.
 
 ## What the LLM does with these tools
 
@@ -190,7 +243,7 @@ apt install duckdb          # Debian/Ubuntu
 # or https://duckdb.org/docs/installation/
 ```
 
-`list_tables` and `describe_table` continue to work without it.
+`list_tables`, `describe_table`, and `get_freshness` continue to work without it.
 
 ### "read manifest: … (run `pg-cdc init` first?)"
 

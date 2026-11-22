@@ -44,6 +44,20 @@ public.orders/deltas/epoch=000002.parquet   ← second batch
 
 Epochs are monotonically increasing. pg-warehouse uses epoch numbers as watermarks to track what it has already pulled.
 
+Three watermarks matter, and they can momentarily differ:
+
+- **received** — the highest epoch whose file is physically in storage.
+- **published** — the highest epoch recorded in `manifest.json`. This is the
+  watermark read services key on.
+- **compacted** — the highest epoch folded into a base snapshot.
+
+A flush uploads its delta files and *then* writes the manifest, so a crash
+between those steps leaves epochs received-but-not-published: on disk, but
+invisible to readers until the next flush commits. `pg-cdc status` reports all
+three per table, and the MCP read tools accept `min_published_epoch` to fail
+closed against a watermark a reader needs. See
+[Operations → Received vs. published vs. compacted](../4-operations/08-operations.md#received-vs-published-vs-compacted).
+
 ## Flush Behavior
 
 ```yaml

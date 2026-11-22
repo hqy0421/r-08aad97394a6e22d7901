@@ -40,26 +40,48 @@ func toolDefinitions() []tool {
 		},
 		{
 			Name:        "query",
-			Description: "Run a read-only SELECT against the Parquet snapshot for a table. Returns rows as JSON.",
+			Description: "Run a read-only SELECT against the Parquet snapshot for a table. Returns rows as JSON. Optionally require a minimum published epoch.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"sql":   map[string]any{"type": "string", "description": "SELECT statement against pg-cdc Parquet tables."},
 					"limit": map[string]any{"type": "integer", "description": "Max rows to return (default 100, max 1000)."},
+					"min_published_epoch": map[string]any{
+						"type":        "integer",
+						"description": "If set, refuse the query unless every referenced table's published (manifest) epoch is at least this value. The response explains any shortfall.",
+					},
 				},
 				"required": []string{"sql"},
 			},
 		},
 		{
 			Name:        "recent_changes",
-			Description: "Return the N most recent rows from the streaming delta files for a table.",
+			Description: "Return the N most recent rows from the streaming delta files for a table. Optionally require a minimum published epoch.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"name":  map[string]any{"type": "string", "description": "Fully-qualified table name."},
 					"limit": map[string]any{"type": "integer", "description": "Max rows (default 20, max 200)."},
+					"min_published_epoch": map[string]any{
+						"type":        "integer",
+						"description": "If set, refuse to return changes unless the table's published (manifest) epoch is at least this value. The response explains any shortfall.",
+					},
 				},
 				"required": []string{"name"},
+			},
+		},
+		{
+			Name:        "get_freshness",
+			Description: "Report per-table received / published / compacted epoch boundaries. Use this to learn the published epoch before passing min_published_epoch to query or recent_changes.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "description": "Optional fully-qualified table name; omit for all active tables."},
+					"min_published_epoch": map[string]any{
+						"type":        "integer",
+						"description": "If set, marks tables below this published epoch.",
+					},
+				},
 			},
 		},
 	}
@@ -84,6 +106,8 @@ func (s *server) callTool(ctx context.Context, raw json.RawMessage) map[string]a
 		return s.query(ctx, p.Arguments)
 	case "recent_changes":
 		return s.recentChanges(ctx, p.Arguments)
+	case "get_freshness":
+		return s.getFreshness(ctx, p.Arguments)
 	default:
 		return errorContent(fmt.Errorf("unknown tool: %s", p.Name))
 	}
